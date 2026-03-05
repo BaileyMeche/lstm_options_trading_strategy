@@ -16,4 +16,4 @@ from .feature_engineering import (
     compute_event_intensity_diagnostics,
 )
 
-from .wrds_utils import connect_wrds, load_wrds_credentials
+from .data_utils import connect_wrds, load_wrds_credentials
