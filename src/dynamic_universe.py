@@ -13,7 +13,7 @@ except ImportError:
 # Applies the same C1-C5 filters as universe_selection.py, point-in-time,
 # with a turnover buffer (rank_buffer) that prevents excessive churn.
 # Full selection rationale: docs/universe_selection_rationale.md
-#v
+#
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
@@ -78,9 +78,15 @@ def _check_liquidity(
     prices_df: pd.DataFrame,
     ticker: str,
     as_of: pd.Timestamp,
-    lookback_days: int = 252,
+    lookback_days: int = 45,
 ) -> bool:
-    """Return True if ticker's trailing ADDV >= ADDV_FLOOR (C3)."""
+    """Return True if ticker's trailing ADDV >= ADDV_FLOOR (C3).
+
+    Default window is 45 calendar days (half a quarter). This captures
+    current liquidity conditions at the rebalance date rather than trailing
+    annual averages. Empirical basis: ~31 trading days gives enough observations
+    to smooth daily volume noise while remaining within the current quarter.
+    """
     subset = prices_df[
         (prices_df["ticker"] == ticker)
         & (prices_df["date"] <= as_of)
@@ -348,11 +354,11 @@ def print_rebalance_log_summary(rebalance_log: list[dict] | None = None) -> None
         return
 
     stats = compute_turnover_stats(log)
-    print("=" * 64)
+
     print("Dynamic Universe Rebalance Summary")
-    print("=" * 64)
+
     print(f"{'Date':<14} {'N':>4} {'Added':>6} {'Removed':>8} {'Turnover':>10}")
-    print("-" * 64)
+    
     for _, row in stats.iterrows():
         print(
             f"{str(row['rebalance_date'].date()):<14}"
@@ -361,10 +367,10 @@ def print_rebalance_log_summary(rebalance_log: list[dict] | None = None) -> None
             f" {row['n_removed']:>8}"
             f" {row['turnover_rate']:>9.1%}"
         )
-    print("-" * 64)
+    
     print(f"  Mean turnover per period : {stats['turnover_rate'].mean():.1%}")
     print(f"  Total rebalance periods  : {len(stats)}")
-    print("=" * 64)
+
 
 
 if __name__ == "__main__":

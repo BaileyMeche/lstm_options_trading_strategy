@@ -288,9 +288,9 @@ def _print_universe_summary() -> None:
 
     sector_counts = UNIVERSE_30["sector"].value_counts()
 
-    print("=" * 72)
+    
     print("30-Stock Static Universe (ranked by 2012-12-31 mkt cap)")
-    print("=" * 72)
+    
     print(summary.to_string())
     print()
     print("Sector breakdown:")
@@ -302,7 +302,7 @@ def _print_universe_summary() -> None:
     print(f"Sectors represented       : {UNIVERSE_30['sector'].nunique()}")
     print(f"D/E zero-imputation needed: {UNIVERSE_30['de_impute_zero'].sum()} "
           f"({', '.join(get_zero_debt_tickers())})")
-    print("=" * 72)
+    
 
 
 if __name__ == "__main__":
