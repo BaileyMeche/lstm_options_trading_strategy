@@ -1,0 +1,41 @@
+Raw data
+  │
+  ├─ fundamentals
+  ├─ stock prices
+  └─ options data
+        │
+        ▼
+Point-in-time adjustment
+        │
+        ▼
+Feature engineering
+        │
+        ▼
+Daily feature panel
+        │
+        ▼
+Sequence construction
+        │
+        ▼
+Train LSTM model
+        │
+        ▼
+Generate predictions
+        │
+        ▼
+Cross-sectional ranking
+        │
+        ▼
+Option selection
+        │
+        ▼
+Delta hedge with stock
+        │
+        ▼
+Daily hedge rebalancing
+        │
+        ▼
+Portfolio PnL
+        │
+        ▼
+Performance evaluation

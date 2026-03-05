@@ -66,6 +66,109 @@ def compute_rolling_beta_vs_spy(
     return pd.concat(parts, ignore_index=True)
 
 
+def _safe_group_pct_change(group: pd.Series) -> pd.Series:
+    prev = group.shift(1)
+    out = np.where(prev.notna() & prev.ne(0), group / prev - 1.0, np.nan)
+    return pd.Series(out, index=group.index, dtype=float)
+
+
+def add_fundamental_change_features(
+    panel_df: pd.DataFrame,
+    ticker_col: str = "ticker",
+    date_col: str = "date",
+) -> pd.DataFrame:
+    """Add change-based fundamental features to a PIT panel."""
+    out = panel_df.copy()
+    out = out.sort_values([ticker_col, date_col]).reset_index(drop=True)
+
+    level_to_change = {
+        "tot_debt_tot_equity": "leverage_change",
+        "ret_equity": "roe_change",
+        "profit_margin": "margin_change",
+    }
+    for level_col, change_col in level_to_change.items():
+        if level_col in out.columns:
+            out[level_col] = pd.to_numeric(out[level_col], errors="coerce")
+            out[change_col] = out.groupby(ticker_col)[level_col].diff()
+
+    growth_map = {
+        "diluted_net_eps": "eps_growth",
+        "book_val_per_share": "book_value_growth",
+    }
+    for level_col, growth_col in growth_map.items():
+        if level_col in out.columns:
+            out[level_col] = pd.to_numeric(out[level_col], errors="coerce")
+            out[growth_col] = out.groupby(ticker_col)[level_col].transform(_safe_group_pct_change)
+
+    return out
+
+
+def add_price_liquidity_features(
+    panel_df: pd.DataFrame,
+    ticker_col: str = "ticker",
+    date_col: str = "date",
+    price_col: str = "adj_close",
+    volume_col: str = "volume",
+    volume_window: int = 20,
+    min_volume_obs: int = 5,
+) -> pd.DataFrame:
+    """Add log return and relative volume features."""
+    out = panel_df.copy()
+    out = out.sort_values([ticker_col, date_col]).reset_index(drop=True)
+
+    if price_col in out.columns:
+        out[price_col] = pd.to_numeric(out[price_col], errors="coerce")
+        out.loc[out[price_col] <= 0, price_col] = np.nan
+        out["log_return"] = out.groupby(ticker_col)[price_col].transform(lambda s: np.log(s).diff())
+
+    if volume_col in out.columns:
+        out[volume_col] = pd.to_numeric(out[volume_col], errors="coerce")
+        rolling_mean = out.groupby(ticker_col)[volume_col].transform(
+            lambda s: s.rolling(window=volume_window, min_periods=min_volume_obs).mean()
+        )
+        out["volume_ratio"] = np.where(rolling_mean.notna() & rolling_mean.ne(0), out[volume_col] / rolling_mean, np.nan)
+
+    return out
+
+
+def winsorize_cross_sectional(
+    panel_df: pd.DataFrame,
+    feature_cols: list[str],
+    date_col: str = "date",
+    lower_q: float = 0.01,
+    upper_q: float = 0.99,
+) -> pd.DataFrame:
+    """Winsorize features cross-sectionally by date."""
+    out = panel_df.copy()
+    for col in feature_cols:
+        if col not in out.columns:
+            continue
+        vals = pd.to_numeric(out[col], errors="coerce")
+        lo = vals.groupby(out[date_col]).transform(lambda s: s.quantile(lower_q))
+        hi = vals.groupby(out[date_col]).transform(lambda s: s.quantile(upper_q))
+        out[col] = vals.clip(lower=lo, upper=hi)
+    return out
+
+
+def zscore_cross_sectional(
+    panel_df: pd.DataFrame,
+    feature_cols: list[str],
+    date_col: str = "date",
+    suffix: str = "_z",
+) -> pd.DataFrame:
+    """Create cross-sectional z-score normalized feature columns by date."""
+    out = panel_df.copy()
+    for col in feature_cols:
+        if col not in out.columns:
+            continue
+        vals = pd.to_numeric(out[col], errors="coerce")
+        grp = vals.groupby(out[date_col])
+        mean = grp.transform("mean")
+        std = grp.transform(lambda s: s.std(ddof=0))
+        out[f"{col}{suffix}"] = np.where(std.notna() & std.ne(0), (vals - mean) / std, np.nan)
+    return out
+
+
 def assign_time_split(
     panel_df: pd.DataFrame,
     train_start: pd.Timestamp,
