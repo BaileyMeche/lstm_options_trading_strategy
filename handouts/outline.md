@@ -21,7 +21,7 @@ All status flags below are based on direct inspection of: [lstm.ipynb](/Users/as
 ### Tasks to Implement
 - Tasks to implement (`NOT COMPLETE`): formalize research problem definition with:
 - Economic hypothesis: delayed/heterogeneous incorporation of fundamentals into prices creates short-horizon return predictability.
-- Empirical predictions: fundamentals+price context should improve out-of-sample cross-sectional ranking quality and tradable spread performance.
+- Empirical predictions: winsorized, cross-sectionally normalized fundamental-change and price/liquidity features should improve out-of-sample cross-sectional ranking quality and tradable spread performance.
 - Model role: LSTM tests nonlinear/state-dependent lag structure against simpler baselines.
 
 ### Files Involved
@@ -79,7 +79,20 @@ All status flags below are based on direct inspection of: [lstm.ipynb](/Users/as
 - Existing implementation: feature list exists in [lstm.ipynb](/Users/assortedsphinx/Desktop/team_t/notebooks/lstm.ipynb:328) and [lstm.ipynb](/Users/assortedsphinx/Desktop/team_t/notebooks/lstm.ipynb:736), but no explicit per-feature economic table.
 
 ##### Tasks to Implement
-- Tasks to implement (`NOT COMPLETE`): add notebook table mapping each feature (`debt/equity`, `ROE`, `P/B`, `profit margin`, `EPS`, `beta`, `adj_close/log_ret`, `volume`) to return-predictive intuition.
+- Tasks to implement (`NOT COMPLETE`): add notebook table mapping each feature (`leverage_change` (Δ `debt/equity`), `roe_change` (Δ `ROE`), `margin_change` (Δ `profit margin`), `book_value_growth`, `eps_growth`, `rolling_beta`, `log_ret`, `volume_ratio`) to return-predictive intuition.
+- Fundamental inputs are expressed as quarter-over-quarter or year-over-year changes rather than levels to reduce firm-size effects and capture economically meaningful updates in firm fundamentals.
+- Raw volume is not used directly.
+- `volume_ratio = volume / rolling_mean(volume, 20)`
+- `volume_ratio` captures abnormal trading activity rather than firm size.
+- Feature engineering pipeline:
+- 1. Compute fundamental changes (QoQ or YoY).
+- 2. Construct derived price/liquidity features (`log_ret`, `rolling_beta`, `volume_ratio`).
+- 3. Winsorize features cross-sectionally at the 1st and 99th percentiles.
+- 4. Cross-sectionally normalize features using z-scores:
+- `z_{i,t} = (x_{i,t} - μ_t) / σ_t`
+- where `μ_t` and `σ_t` are the mean and standard deviation across assets on date `t`.
+- 5. Feed normalized features into model tensors.
+- Train-only fitting where applicable: any statistics used for scaling in model pipelines are computed using training data only to avoid information leakage.
 
 #### Feature Stability Diagnostics
 - Feature stability diagnostics
@@ -100,7 +113,7 @@ All status flags below are based on direct inspection of: [lstm.ipynb](/Users/as
 - Outputs: `data/lstm_final/processed/feature_panel_final.parquet`, `data/lstm_final/processed/feature_metadata.json`.
 
 ##### Recommended Approach
-- Recommended approach: keep current feature set and add documentation/diagnostics around it.
+- Recommended approach: keep current winsorized, cross-sectionally normalized fundamental-change and price/liquidity features and add documentation/diagnostics around it.
 
 ## Stage 3 — Dataset construction and lookback window generation
 
@@ -155,10 +168,10 @@ All status flags below are based on direct inspection of: [lstm.ipynb](/Users/as
 - Note: pooled training stacks samples across tickers; no ticker-ID embedding by default (optional extension only if needed).
 - `Per-stock model variant (robustness only)` — `NOT COMPLETE`
 - Implementation: add optional per-ticker training path for robustness comparison only.
-- `Baseline 1: Linear model (lagged returns + fundamentals)` — `NOT COMPLETE`
+- `Baseline 1: Linear model (winsorized, cross-sectionally normalized fundamental-change and price/liquidity features)` — `NOT COMPLETE`
 - Implementation: add linear baseline (start with Ridge or OLS; keep it simple) with identical train/dev/test split and same timing convention as primary strategy.
 - `Baseline 2: Price-only LSTM` — `NOT COMPLETE`
-- Implementation: same LSTM architecture, but restrict inputs to price/return features to test incremental value of fundamentals.
+- Implementation: same LSTM architecture, but restrict inputs to price/liquidity-only features (`log_ret`, `rolling_beta`, `volume_ratio`) to test incremental value of the full winsorized, cross-sectionally normalized fundamental-change and price/liquidity features.
 
 ## Stage 5 — Model training pipeline
 
@@ -277,7 +290,7 @@ All status flags below are based on direct inspection of: [lstm.ipynb](/Users/as
 
 - `Canonical execution convention` — `COMPLETE` (selected)
 - Use **Option A** project-wide:
-- Features use info available through close of day `t` (PIT fundamentals + price/volume through `t` close).
+- Features use info available through close of day `t` (PIT winsorized, cross-sectionally normalized fundamental-change and price/liquidity features through `t` close).
 - Prediction targets next-day return at `t+1`.
 - Signal is formed after close `t`.
 - Execution occurs at open `t+1`.
@@ -340,7 +353,7 @@ Sensitivity analysis will test `K ∈ {2,3,4}` in Stage 12.
 
 | Timeline row | Definition |
 |---|---|
-| `(t) data used` | PIT fundamentals with `feature_available_date <= t`, plus prices/volume through close `t` |
+| `(t) data used` | PIT winsorized, cross-sectionally normalized fundamental-change and price/liquidity features with `feature_available_date <= t` through close `t` |
 | `(t) signal computed` | model prediction and cross-sectional rank formed after close `t` |
 | `(t+1) execution + return realized` | execute at open `t+1`, realize PnL over `open(t+1) -> close(t+1)` |
 
