@@ -1,0 +1,337 @@
+Below is your pipeline rewritten so that each stage explicitly maps to your trading strategy. This makes it easy to explain in a paper, presentation, or repo README because every step now corresponds to a real part of the strategy implementation.
+
+⸻
+
+Full Pipeline for the Delta-Hedged Options Strategy
+
+1. Raw Data
+
+Three datasets are required.
+
+Fundamentals (quarterly)
+
+Used to construct the signal.
+
+Examples:
+
+ROE
+profit_margin
+debt_equity 
+EPS
+book_value_per_share
+
+These come from Zacks or similar sources.
+
+⸻
+
+Stock Prices (daily)
+
+Required for:
+
+return targets
+delta hedge
+realized volatility
+
+Fields:
+
+date
+ticker
+open
+close
+adj_open
+adj_close
+volume
+
+
+⸻
+
+Options Data (daily)
+
+From OptionMetrics IvyDB US.
+
+Used for:
+
+ATM option prices
+delta
+implied volatility
+
+Example fields:
+
+date
+ticker
+strike
+expiration
+delta
+mid_price
+implied_vol
+open_interest
+
+
+⸻
+
+2. Point-in-Time Adjustment
+
+Align fundamentals with the date they become observable to investors.
+
+Define:
+
+availability\_date = period\_end + reporting\_lag
+
+Typical lag:
+
+45 days
+
+This ensures:
+
+model only sees information known at time t
+
+and eliminates look-ahead bias.
+
+⸻
+
+3. Feature Engineering
+
+Transform fundamentals into predictive signals.
+
+Compute changes rather than levels.
+
+Examples:
+
+roe_change
+margin_change
+leverage_change
+eps_growth
+book_value_growth
+
+Then add price/liquidity variables:
+
+log_return
+rolling_beta
+volume_ratio
+
+Apply preprocessing:
+
+winsorization (1–99%)
+cross-sectional z-score normalization
+
+
+⸻
+
+4. Daily Feature Panel
+
+Construct the final modeling dataset.
+
+Structure:
+
+date
+ticker
+feature_1
+feature_2
+...
+feature_k
+target_return
+
+Target variable:
+
+target_{i,t} = \log(P_{i,t+1}/P_{i,t})
+
+This panel becomes the input for the LSTM.
+
+⸻
+
+5. Sequence Construction
+
+Convert the panel into LSTM sequences.
+
+Example lookback window:
+
+60 trading days
+
+Each sample:
+
+X = features over past 60 days
+y = next-day return
+
+Dataset shape:
+
+samples × lookback × features
+
+
+⸻
+
+6. Train LSTM Model
+
+Train a pooled cross-sectional LSTM.
+
+Model input:
+
+feature sequences
+
+Output:
+
+predicted next return
+
+The model learns patterns in fundamental updates and market response.
+
+⸻
+
+7. Generate Predictions
+
+For each stock on each day:
+
+predict expected return
+
+Output table:
+
+date
+ticker
+prediction
+actual_return
+
+
+⸻
+
+8. Cross-Sectional Ranking
+
+Each day:
+
+rank stocks by predicted signal
+
+Trading rule:
+
+top K stocks → trade
+
+Example:
+
+K = 3
+
+These stocks are expected to experience information-driven price adjustments.
+
+⸻
+
+9. Option Selection
+
+For each selected stock:
+
+Choose an option satisfying:
+
+ATM strike
+30–45 days maturity
+high liquidity
+
+Example:
+
+stock price = 100
+strike ≈ 100
+expiration ≈ 30 days
+
+Trade:
+
+buy 1 option contract
+
+
+⸻
+
+10. Delta Hedge with Stock
+
+Neutralize directional exposure.
+
+Hedge ratio:
+
+stock\_hedge = \Delta \times contract\_size
+
+Example:
+
+option delta = 0.50
+contract size = 100
+short 50 shares
+
+Portfolio:
+
++1 call option
+-50 shares stock
+
+Net delta ≈ 0.
+
+⸻
+
+11. Daily Hedge Rebalancing
+
+Option delta changes as price moves.
+
+Each day:
+
+recalculate delta
+adjust stock hedge
+
+Goal:
+
+maintain near-zero portfolio delta
+
+
+⸻
+
+12. Portfolio PnL
+
+Daily profit comes from the delta-hedged option position.
+
+Approximate decomposition:
+
+d\Pi \approx \frac{1}{2}\Gamma S^2 (dS)^2 + \Theta dt + Vega d\sigma
+
+Meaning returns arise from:
+
+gamma exposure
+realized volatility
+changes in implied volatility
+
+not simple stock direction.
+
+⸻
+
+13. Performance Evaluation
+
+Evaluate strategy performance.
+
+Metrics:
+
+Sharpe ratio
+volatility
+max drawdown
+win rate
+turnover
+
+Benchmarks:
+
+SPY buy-and-hold
+equal-weight universe
+
+
+⸻
+
+Final Strategy Flow
+
+Fundamental changes
+        ↓
+LSTM prediction
+        ↓
+Stock ranking
+        ↓
+Buy ATM options
+        ↓
+Delta hedge with stock
+        ↓
+Rebalance hedge daily
+        ↓
+Profit from volatility and convex price moves
+
+
+⸻
+
+One Clean Description
+
+The strategy trains an LSTM model on lagged quarterly changes in firm fundamentals to identify stocks likely to experience price adjustments following new information. We trade these signals by purchasing near-ATM options and dynamically delta hedging with the underlying equity, allowing the portfolio to profit primarily from convex price movements and realized volatility rather than directional market exposure.
+
+⸻
+
+If you’d like, I can also show you two small pipeline tweaks that will dramatically improve the realism of the backtest for this kind of options strategy (they’re things most academic projects accidentally miss).
