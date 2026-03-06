@@ -5,7 +5,7 @@ from pathlib import Path
 import re
 from typing import Any
 
-import nasdaqdatalink
+
 import numpy as np
 import pandas as pd
 from dotenv import load_dotenv
@@ -353,7 +353,7 @@ def load_wrds_credentials(env_candidates: list[Path] | None = None) -> tuple[str
 
     env_path = next((p for p in env_candidates if p.exists()), None)
     if env_path:
-        load_dotenv(env_path)
+        load_dotenv(env_path, override=True)
 
     username = os.getenv("WRDS_USERNAME")
     password = os.getenv("WRDS_PASSWORD")
@@ -370,7 +370,7 @@ def load_wrds_credentials(env_candidates: list[Path] | None = None) -> tuple[str
 def connect_wrds(env_candidates: list[Path] | None = None) -> wrds.Connection:
     """Return an open WRDS connection using credentials from .env."""
     username, password = load_wrds_credentials(env_candidates)
-    return wrds.Connection(wrds_username=username, wrds_password=password)
+    return wrds.Connection(wrds_username=username, wrds_password=password or "")
 
 
 def load_universe_tickers(
@@ -914,3 +914,82 @@ def pull_optionmetrics_calls_atm_dataset(
     )
     print(f"[output] rows={len(final_df):,} path={output_path}")
     return final_df
+
+
+# ---------------------------------------------------------------------------
+# Compustat earnings announcement dates (rdq)
+# ---------------------------------------------------------------------------
+
+def fetch_earnings_announcement_dates(
+    tickers: list,
+    start_date: str = "2006-01-01",
+    end_date: str = "2013-12-31",
+    output_path=None,
+    env_candidates=None,
+) -> "pd.DataFrame":
+    """Fetch actual earnings announcement dates (rdq) from WRDS Compustat.
+
+    Uses comp.fundq (quarterly fundamentals) joined to comp.security for
+    ticker→gvkey mapping. `rdq` is the actual earnings report date —
+    far closer to the earnings call than the SEC 10-Q filing date.
+
+    Returns DataFrame: ticker, gvkey, rdq, datadate, fqtr, fyearq.
+    """
+    if env_candidates is None:
+        env_candidates = [Path(".env"), Path("../.env")]
+
+    db = connect_wrds(env_candidates)
+
+    # Normalise BRK_B → BRK/B for Compustat
+    comp_tickers = [t.replace("_", "/") for t in tickers]
+    ticker_list  = ", ".join(f"'{t}'" for t in comp_tickers)
+
+    # Step 1: resolve gvkeys
+    gvkey_df = db.raw_sql(f"""
+        SELECT DISTINCT s.gvkey, s.tic AS ticker
+        FROM   comp.security s
+        WHERE  s.tic IN ({ticker_list})
+          AND  s.excntry = 'USA'
+    """)
+    print(f"[compustat] gvkeys resolved: {len(gvkey_df)} rows")
+    if gvkey_df.empty:
+        db.close()
+        raise ValueError(f"[compustat] No gvkeys found for: {comp_tickers}")
+
+    gvkey_list = ", ".join(f"'{g}'" for g in gvkey_df["gvkey"].unique())
+
+    # Step 2: pull rdq
+    fundq_df = db.raw_sql(f"""
+        SELECT f.gvkey, f.datadate, f.rdq, f.fqtr, f.fyearq
+        FROM   comp.fundq f
+        WHERE  f.gvkey  IN ({gvkey_list})
+          AND  f.rdq    IS NOT NULL
+          AND  f.rdq    >= '{start_date}'
+          AND  f.rdq    <= '{end_date}'
+          AND  f.indfmt  = 'INDL'
+          AND  f.datafmt = 'STD'
+          AND  f.popsrc  = 'D'
+          AND  f.consol  = 'C'
+        ORDER BY f.gvkey, f.rdq
+    """)
+    db.close()
+    print(f"[compustat] fundq rows: {len(fundq_df)}")
+
+    result = fundq_df.merge(gvkey_df, on="gvkey", how="left")
+    result["rdq"]      = pd.to_datetime(result["rdq"])
+    result["datadate"] = pd.to_datetime(result["datadate"])
+    result["ticker"]   = result["ticker"].str.replace("/", "_", regex=False)
+    result = result[result["ticker"].isin(tickers)].copy()
+    result = result.sort_values(["ticker", "rdq"]).reset_index(drop=True)
+
+    print(f"[compustat] rows={len(result)} | "
+          f"{result['rdq'].min().date()} → {result['rdq'].max().date()}")
+    print(f"[compustat] tickers: {sorted(result['ticker'].unique())}")
+
+    if output_path is not None:
+        out = Path(output_path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        result.to_parquet(out, index=False)
+        print(f"[compustat] saved → {out}")
+
+    return result
