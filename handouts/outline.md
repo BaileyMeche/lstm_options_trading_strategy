@@ -414,26 +414,82 @@ Sensitivity analysis will test `K ∈ {2,3,4}` in Stage 12.
 
 ### Stage Summary
 - Status: `PARTIALLY COMPLETE`
-- Purpose: enforce portfolio risk controls and exposure monitoring using Stage 8 positions.
+- Purpose: measure, monitor, and increasingly enforce portfolio risk controls and exposure diagnostics using realized Stage 8 / Stage 9 positions rather than raw signals.
 
 ### Existing Implementation
-- Existing implementation (`PARTIALLY COMPLETE`): asset-level rolling beta feature exists in [feature_engineering.py](/Users/assortedsphinx/Desktop/team_t/src/feature_engineering.py:37); no portfolio risk framework exists.
+- Existing implementation (`PARTIALLY COMPLETE`): a working portfolio-level risk framework now exists in `src/risk_utils.py` and `src/exposure_utils.py` and is called from the backtest notebook.
+- Existing implementation (`COMPLETE` for monitoring backbone): daily equity, drawdown, rolling volatility, rolling Sharpe, rolling Sortino, historical VaR/CVaR, trade-level risk summaries, gross/net exposure, ticker concentration, beta exposure scaffolding, and risk-event exports are implemented.
+- Existing implementation (`PARTIALLY COMPLETE` for marked exposure quality): exposure now attempts to use `position_log` as the primary source and falls back to trade-log reconstruction when needed.
+- Existing implementation (`PARTIALLY COMPLETE` for controls): breach flags and event logging exist, but most de-risking responses are still monitoring outputs rather than fully enforced trading rules.
 
-### Tasks to Implement
-- Tasks to implement (`NOT COMPLETE`), explicitly using `positions_daily.csv` from Stage 8:
-- portfolio beta exposure to SPY
-- sector concentration metrics
+### Risk Measurement Choices Implemented
+- Equity curve:
+- primary source is `daily_pnl_df`; fallback is cumulative realized PnL from exit rows.
+- equity is tracked from configurable `initial_capital`.
+- Drawdown:
+- drawdown is measured relative to running equity peak.
+- summary includes max drawdown, trough date, start date, recovery date, recovery days, and count of drawdown periods.
+- current default drawdown breach threshold is `-10%`.
+- Rolling portfolio risk:
+- rolling window is `21` trading days.
+- metrics include annualized rolling volatility, rolling Sharpe, and rolling Sortino.
+- Tail risk:
+- historical-simulation daily VaR and CVaR are computed from daily equity returns.
+- default confidence levels are `0.1%`, `1%`, `5%`, and `10%` tails.
+- Trade-level risk:
+- win rate, average win/loss, reward-risk ratio, holding-period quantiles, stop-loss rate, stop-loss PnL, and exit-reason distributions are computed from realized trade logs.
+- Exposure measurement:
+- daily exposure is computed from realized positions, with `position_log` preferred and trade-log expansion used as fallback.
+- metrics include `n_positions`, `gross_exposure`, `net_exposure`, `net_delta_exposure`, `long_option_value`, and `short_stock_value`.
+- normalized exposure fields are also written as shares of equity, including gross, net, and beta-style exposure percentages.
+- Greeks exposure:
+- Stage 10 now computes portfolio-level marked `delta`, `gamma`, `vega`, and `theta` exposures when the required columns are available in `position_log`; otherwise missing Greeks default to zero safely.
+- Concentration:
+- ticker concentration is measured daily with HHI and max single-name weight.
+- sector concentration is now supported when a `sector_lookup` mapping is supplied.
+- Beta exposure:
+- portfolio beta exposure is computed when `beta_lookup` is supplied.
+- if no `beta_lookup` is provided, beta exposure remains an approximation only.
+- Risk limits currently parameterized in notebook call:
+- `max_gross_exposure_pct = 0.10`
+- `max_net_exposure_pct = 0.05`
+- `max_abs_beta_exposure = 0.25`
+- `max_single_name_weight = 0.50`
+- `max_sector_weight = 0.60`
+- Risk-event framework:
+- Stage 10 writes drawdown breaches, volatility spikes, and limit-breach style events to `risk_events.csv`.
+- a simple stress-scenario output is also written to `stress_scenarios.csv`.
+
+### Covered
+- Covered (`COMPLETE OR MOSTLY COMPLETE`):
+- realized equity and drawdown monitoring
+- rolling volatility / Sharpe / Sortino
+- historical VaR / CVaR
+- trade-level loss diagnostics
 - gross vs net exposure monitoring
-- drawdown-triggered de-risking rules
+- normalized exposure monitoring as percent of equity
+- ticker concentration metrics
+- beta exposure framework
+- daily Greeks exposure framework (`delta`, `gamma`, `vega`, `theta`)
+- risk event logging
+- Stage 10 CSV exports for downstream evaluation
+
+### Remaining Gaps
+- Remaining gaps (`NOT COMPLETE`):
+- sector concentration is only fully active when a real `sector_lookup` mapping is supplied in the notebook
+- portfolio beta exposure is only fully credible when a real `beta_lookup` mapping is supplied in the notebook
+- drawdown-triggered and volatility-triggered de-risking are still mostly logging/flagging rather than guaranteed execution-layer enforcement
+- liquidity and execution-risk diagnostics are still missing from Stage 10
+- scenario/stress testing exists only in simple form and should be strengthened for options-specific shock design
 
 ### Files Involved
-- Files involved: new `/Users/assortedsphinx/Desktop/team_t/src/risk_utils.py`, new `/Users/assortedsphinx/Desktop/team_t/src/exposure_utils.py`, Stage 8 output.
+- Files involved: `src/risk_utils.py`, `src/exposure_utils.py`, Stage 8 / Stage 9 realized outputs (`trade_log`, `position_log`, `daily_pnl`).
 
 ### Outputs
-- Outputs: `risk_exposure_daily.csv`, `risk_events.csv`.
+- Outputs: `risk_exposure_daily.csv`, `risk_events.csv`, `stress_scenarios.csv`.
 
 ### Recommended Approach
-- Recommended approach: compute exposures from realized positions, not from raw signals.
+- Recommended approach: keep computing risk from realized positions, not raw signals; pass live `beta_lookup` and `sector_lookup` inputs as soon as available; and convert breach flags into explicit execution-layer de-risking rules in the next iteration.
 
 ## Stage 11 — Transaction cost modeling
 
