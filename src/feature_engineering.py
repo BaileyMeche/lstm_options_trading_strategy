@@ -208,14 +208,15 @@ def _build_sequences_for_split(
 
         valid = feat.notna().all(axis=1) & target.notna()
         group = group.loc[valid].copy()
-        if len(group) <= lookback:
+        if len(group) < lookback:
             continue
 
         feat_arr = group[feature_cols].to_numpy(dtype=float)
         target_arr = pd.to_numeric(group[target_col], errors="coerce").to_numpy(dtype=float)
 
-        for idx in range(lookback, len(group)):
-            x_parts.append(feat_arr[idx - lookback : idx, :])
+        for idx in range(lookback - 1, len(group)):
+            # X through t predicts return from t to t+1 (stored in target_arr[idx]).
+            x_parts.append(feat_arr[idx - lookback + 1 : idx + 1, :])
             y_parts.append(np.array(target_arr[idx], dtype=float))
 
     if not x_parts:

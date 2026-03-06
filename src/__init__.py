@@ -26,3 +26,13 @@ from .data_utils import (
     load_universe_tickers,
     pull_optionmetrics_calls_atm_dataset,
 )
+
+from .model_utils import (
+    build_sequence_dataset,
+    save_sequence_dataset_npz,
+    load_sequence_dataset_npz,
+    PooledLSTMRegressor,
+    train_pooled_lstm,
+    predict_pooled_lstm,
+    walk_forward_lstm_predictions,
+)
