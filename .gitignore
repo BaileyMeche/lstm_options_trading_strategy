@@ -214,3 +214,5 @@ data/lstm_draft/processed/*.pkl
 data/lstm_draft/processed/
 optionmetrics_calls_atm_20_60d_dynamic_universe_full_history.parquet
 *.parquet
+
+optionmetrics_calls_atm_20_60d_dynamic_universe_full_history.parquet
