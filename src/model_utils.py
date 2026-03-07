@@ -30,6 +30,8 @@ def build_sequence_dataset(
     missing = sorted(required - set(panel_df.columns))
     if missing:
         raise KeyError(f"Missing columns for sequence build: {missing}")
+    if lookback < 1:
+        raise ValueError(f"lookback must be >= 1, got {lookback}")
 
     panel = panel_df.copy()
     panel[date_col] = pd.to_datetime(panel[date_col], errors="coerce")

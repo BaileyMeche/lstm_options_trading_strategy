@@ -300,6 +300,13 @@ def asof_join_point_in_time(
         if col in fundamental_cols
     ]
 
+    if prices_df.empty:
+        out = prices_df.copy()
+        for col in fundamental_cols:
+            if col not in out.columns:
+                out[col] = np.nan
+        return out
+
     for ticker, px in prices_df.groupby(by_ticker_col, sort=False):
         px = px.sort_values(on_date_col).copy()
         f_ticker = fundamentals_df[fundamentals_df[by_ticker_col] == ticker].copy()
@@ -308,7 +315,10 @@ def asof_join_point_in_time(
         if f_ticker.empty:
             for col in fundamental_cols:
                 if col not in px.columns:
-                    px[col] = np.nan
+                    if col in {"per_end_date", "feature_available_date"}:
+                        px[col] = pd.NaT
+                    else:
+                        px[col] = np.nan
             merged_parts.append(px)
             continue
 
@@ -326,7 +336,7 @@ def asof_join_point_in_time(
 
         merged_parts.append(merged)
 
-    out = pd.concat(merged_parts, ignore_index=True)
+    out = pd.concat(merged_parts, ignore_index=True, sort=False)
     out = out.sort_values([by_ticker_col, on_date_col]).reset_index(drop=True)
     return out
 
@@ -396,7 +406,7 @@ def load_universe_tickers(
         .astype(str)
         .str.strip()
         .str.upper()
-        .replace({"": np.nan})
+        .replace({"": np.nan, "NAN": np.nan, "NONE": np.nan})
         .dropna()
         .drop_duplicates()
         .tolist()

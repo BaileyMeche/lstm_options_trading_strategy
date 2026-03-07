@@ -211,8 +211,7 @@ PRICES.csv
 
 
 data/lstm_draft/processed/*.pkl
-data/lstm_draft/processed/
-optionmetrics_calls_atm_20_60d_dynamic_universe_full_history.parquet
-*.parquet
+data/lstm_draft/processed/data/lstm_draft/processed/feature_panel_pit_normalized_full_history.csv
 
-optionmetrics_calls_atm_20_60d_dynamic_universe_full_history.parquet
+# local datasets
+data/
