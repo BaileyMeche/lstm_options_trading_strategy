@@ -310,6 +310,14 @@ def generate_signal_books(
     """
     # 1. Load predictions
     df = pd.read_csv(predictions_path, parse_dates=["date"])
+    if "y_pred" not in df.columns and "prediction" in df.columns:
+        df = df.rename(columns={"prediction": "y_pred"})
+    if "y_true" not in df.columns and "actual_return" in df.columns:
+        df = df.rename(columns={"actual_return": "y_true"})
+    if "y_pred" not in df.columns:
+        raise KeyError(
+            "Predictions file must contain 'y_pred' or 'prediction' column for signal ranking."
+        )
 
     # 2. Validate no lookahead columns
     validate_no_lookahead(df)

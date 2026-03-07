@@ -13,6 +13,8 @@ from src.data_utils import (
     _to_api_filters,
     asof_join_point_in_time,
     build_static_top10_universe,
+    fetch_zacks_table,
+    load_prices_csv_required,
     load_universe_tickers,
     normalize_ticker_for_prices,
     prepare_fundamentals_with_availability,
@@ -167,3 +169,55 @@ def test_load_universe_tickers_uses_fallback_and_normalizes(tmp_path: Path) -> N
 def test_chunked_rejects_invalid_size() -> None:
     with pytest.raises(ValueError, match="chunk_size"):
         _chunked([1, 2, 3], chunk_size=0)
+
+
+def test_fetch_zacks_table_applies_post_filters_for_unsupported(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _fake_get_table(table_code: str, qopts: dict[str, object], paginate: bool, **kwargs: object) -> pd.DataFrame:
+        captured["table_code"] = table_code
+        captured["kwargs"] = kwargs
+        assert qopts["columns"] == ["ticker", "sp500_member_flag"]
+        return pd.DataFrame(
+            {
+                "ticker": ["A", "B", "C"],
+                "sp500_member_flag": ["Y", "N", "Y"],
+                "extra_col": [1, 2, 3],
+            }
+        )
+
+    monkeypatch.setattr("src.data_utils.nasdaqdatalink.get_table", _fake_get_table)
+
+    out = fetch_zacks_table(
+        table_code="ZACKS/MT",
+        columns=["ticker", "sp500_member_flag"],
+        filters={"sp500_member_flag": "Y", "ticker": {"in": ["A", "C"]}},
+        paginate=True,
+    )
+
+    assert captured["table_code"] == "ZACKS/MT"
+    assert captured["kwargs"] == {"ticker": ["A", "C"]}
+    assert out["ticker"].tolist() == ["A", "C"]
+    assert out.columns.tolist() == ["ticker", "sp500_member_flag"]
+
+
+def test_load_prices_csv_required_filters_on_ticker_and_date(tmp_path: Path) -> None:
+    csv_path = tmp_path / "PRICES.csv"
+    pd.DataFrame(
+        {
+            "ticker": ["A", "A", "B"],
+            "date": ["2020-01-01", "2020-02-01", "2020-01-15"],
+            "adj_close": [10, 11, 20],
+            "volume": [100, 110, 200],
+        }
+    ).to_csv(csv_path, index=False)
+
+    out = load_prices_csv_required(
+        csv_path=csv_path,
+        tickers=["A"],
+        start="2020-01-10",
+        end="2020-12-31",
+        usecols=["ticker", "date", "adj_close", "volume"],
+    )
+    assert out["ticker"].tolist() == ["A"]
+    assert out["date"].tolist() == [pd.Timestamp("2020-02-01")]

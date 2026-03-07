@@ -102,3 +102,22 @@ def test_generate_signal_books_writes_outputs(tmp_path: Path) -> None:
     assert (out_dir / "signal_book_long_short.csv").exists()
     assert (out_dir / "signal_book_long_only.csv").exists()
     assert not books["long_short"].empty
+
+
+def test_generate_signal_books_accepts_prediction_alias_columns(tmp_path: Path) -> None:
+    pred_path = tmp_path / "preds_alias.csv"
+    out_dir = tmp_path / "signals_alias"
+
+    preds = pd.DataFrame(
+        {
+            "date": pd.to_datetime(["2020-01-02"] * 3),
+            "ticker": ["A", "B", "C"],
+            "prediction": [0.5, 0.1, -0.2],
+            "actual_return": [0.01, 0.0, -0.01],
+            "volume": [100, 90, 80],
+        }
+    )
+    preds.to_csv(pred_path, index=False)
+
+    books = generate_signal_books(str(pred_path), output_dir=str(out_dir), K=1)
+    assert not books["long_only"].empty

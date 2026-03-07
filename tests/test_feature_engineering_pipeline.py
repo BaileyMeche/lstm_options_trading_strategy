@@ -63,7 +63,7 @@ def test_add_price_liquidity_features_adds_log_return_and_volume_ratio() -> None
 
 def test_add_staged_features_handles_pre_report_rows_and_computes_late_stages() -> None:
     dates = pd.bdate_range("2020-01-01", periods=10)
-    feature_available = [pd.NaT, pd.NaT, dates[2], dates[2], dates[5], dates[5], dates[5], dates[7], dates[7], dates[7]]
+    feature_available = [pd.NaT, pd.NaT, dates[2], dates[2], dates[2], dates[5], dates[5], dates[7], dates[7], dates[7]]
 
     panel = pd.DataFrame(
         {
