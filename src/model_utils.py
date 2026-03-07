@@ -1,9 +1,51 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
+import platform
+import sys
+import types
 
 import numpy as np
 import pandas as pd
+
+
+def _install_pdb_stub_for_torch_on_macos_py313() -> None:
+    """Work around a torch import segfault on macOS + Python 3.13.
+
+    In this environment, importing torch can segfault while importing `pdb`
+    from `torch.distributed`. A lightweight stub avoids the crash path.
+    Disable via TORCH_DISABLE_PDB_STUB=1.
+    """
+    if platform.system() != "Darwin" or sys.version_info < (3, 13):
+        return
+    if os.getenv("TORCH_DISABLE_PDB_STUB", "0") == "1":
+        return
+    if "pdb" in sys.modules:
+        return
+
+    pdb_stub = types.ModuleType("pdb")
+
+    class _Pdb:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        @staticmethod
+        def interaction(*args, **kwargs) -> None:
+            return None
+
+        def message(self, *args, **kwargs) -> None:
+            return None
+
+        def set_trace(self, *args, **kwargs) -> None:
+            return None
+
+    pdb_stub.Pdb = _Pdb
+    sys.modules["pdb"] = pdb_stub
+
+
+_install_pdb_stub_for_torch_on_macos_py313()
+
 import torch
 from torch import nn
 from torch.utils.data import DataLoader, TensorDataset

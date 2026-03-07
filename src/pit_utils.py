@@ -9,8 +9,8 @@ close of t may be used. Three lookahead sources are addressed:
 1. Feature revisions — accounting data is restated after initial release.
    Only the vintage value (figure actually available at date t) is used.
 
-2. Prediction leakage — LSTM predictions for date t must be trained
-   exclusively on data available at close of t-1.
+2. Signal timing leakage — trade signal timestamps must strictly precede
+   trade entry timestamps.
 
 3. Option data timing — option prices at t correspond to close of t,
    not open of t+1.
@@ -245,44 +245,17 @@ def build_pit_prediction_panel(
     signal_date_col: str = "date",
     ticker_col: str = "ticker",
 ) -> pd.DataFrame:
-    """
-    Join predictions to the PIT feature panel.
-
-    For each (signal_date, ticker) in predictions_df, attaches the PIT-safe
-    feature values available at signal_date (from feature_panel_pit).
-
-    Adds columns:
-        pit_feature_lag : (signal_date - pit_vintage_date).days
-                          Positive = data is stale by this many days (expected).
-                          Negative = data is from the future (lookahead violation).
-        pit_safe        : True if pit_feature_lag >= 0
-
-    Asserts all rows are pit_safe before returning.
-
-    Parameters
-    ----------
-    predictions_df    : DataFrame with signal_date_col and ticker_col columns.
-    feature_panel_pit : PIT-safe feature panel (output of build_pit_feature_panel).
-    signal_date_col   : Date column in predictions_df.
-    ticker_col        : Ticker column in both DataFrames.
-
-    Returns
-    -------
-    pd.DataFrame: predictions_df with pit_feature_lag and pit_safe columns added.
-    """
     preds = predictions_df.copy()
     preds[signal_date_col] = pd.to_datetime(preds[signal_date_col], errors="coerce")
 
     panel = feature_panel_pit.copy()
 
-    # Determine which date column to use in the feature panel for joining
-    panel_date_col = signal_date_col  # assume same name ("date")
+    panel_date_col = signal_date_col
     if panel_date_col not in panel.columns:
         panel_date_col = [c for c in panel.columns if "date" in c.lower()][0]
 
     panel[panel_date_col] = pd.to_datetime(panel[panel_date_col], errors="coerce")
 
-    # Join on (signal_date_col, ticker_col)
     pit_subset = panel[[ticker_col, panel_date_col, "pit_vintage_date"]].drop_duplicates()
     pit_subset = pit_subset.rename(columns={panel_date_col: signal_date_col})
 
@@ -302,7 +275,6 @@ def build_pit_prediction_panel(
             result["pit_feature_lag"] >= 0
         )
     else:
-        # No vintage info available — mark as safe (cannot validate)
         warnings.warn(
             "[PIT] pit_vintage_date not found in feature_panel_pit. "
             "Cannot compute pit_feature_lag. pit_safe set to True (unvalidated).",
@@ -320,24 +292,6 @@ def compute_pit_signal_decay(
     lag_col: str = "pit_feature_lag",
     n_bins: int = 5,
 ) -> pd.DataFrame:
-    """
-    Analyze how prediction strength varies with feature data staleness.
-
-    Bins rows by pit_feature_lag (days since last vintage) and computes
-    per-bin signal statistics.
-
-    Parameters
-    ----------
-    pit_panel  : DataFrame with lag_col and signal_col.
-    signal_col : Column with prediction/signal values.
-    lag_col    : Column with feature lag in days.
-    n_bins     : Number of quantile bins.
-
-    Returns
-    -------
-    pd.DataFrame with columns:
-        lag_bin, mean_lag_days, mean_prediction, std_prediction, n_signals
-    """
     df = pit_panel[[signal_col, lag_col]].dropna().copy()
 
     if df.empty:
@@ -348,17 +302,16 @@ def compute_pit_signal_decay(
     try:
         df["lag_bin"] = pd.qcut(df[lag_col], q=n_bins, duplicates="drop")
     except ValueError:
-        # Fall back to cut if qcut fails (e.g., too few unique values)
         df["lag_bin"] = pd.cut(df[lag_col], bins=n_bins, duplicates="drop")
 
     grouped = df.groupby("lag_bin", observed=True, sort=True)
 
     result = pd.DataFrame({
-        "lag_bin":         grouped[lag_col].apply(lambda x: str(x.name)).reset_index(drop=True),
-        "mean_lag_days":   grouped[lag_col].mean().values,
+        "lag_bin": grouped[lag_col].apply(lambda x: str(x.name)).reset_index(drop=True),
+        "mean_lag_days": grouped[lag_col].mean().values,
         "mean_prediction": grouped[signal_col].mean().values,
-        "std_prediction":  grouped[signal_col].std().values,
-        "n_signals":       grouped[signal_col].count().values,
+        "std_prediction": grouped[signal_col].std().values,
+        "n_signals": grouped[signal_col].count().values,
     })
 
     return result.reset_index(drop=True)
