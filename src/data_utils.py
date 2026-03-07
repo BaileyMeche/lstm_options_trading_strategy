@@ -300,6 +300,13 @@ def asof_join_point_in_time(
         if col in fundamental_cols
     ]
 
+    if prices_df.empty:
+        out = prices_df.copy()
+        for col in fundamental_cols:
+            if col not in out.columns:
+                out[col] = np.nan
+        return out
+
     for ticker, px in prices_df.groupby(by_ticker_col, sort=False):
         px = px.sort_values(on_date_col).copy()
         f_ticker = fundamentals_df[fundamentals_df[by_ticker_col] == ticker].copy()

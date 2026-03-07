@@ -161,6 +161,11 @@ _STAGE_FEATURE_MAP: dict[int, list[str]] = {
     4: STAGE_4_DERIVED_FEATURE_COLS,
     5: STAGE_5_DERIVED_FEATURE_COLS,
 }
+DEFAULT_CROSS_SECTION_RAW_SCALE_FEATURE_COLS = [
+    "log_return",
+    "rolling_beta",
+    "vol_regime_ratio_20_60",
+]
 
 
 def get_stage_feature_columns(max_stage: int = 5) -> list[str]:
@@ -172,6 +177,15 @@ def get_stage_feature_columns(max_stage: int = 5) -> list[str]:
     for stage in range(1, max_stage + 1):
         cols.extend(_STAGE_FEATURE_MAP[stage])
     return cols
+
+
+def get_cross_section_rank_feature_columns(
+    feature_cols: list[str],
+    exclude_cols: list[str] | None = None,
+) -> list[str]:
+    """Return feature columns to convert into cross-sectional ranks."""
+    excluded = set(exclude_cols or DEFAULT_CROSS_SECTION_RAW_SCALE_FEATURE_COLS)
+    return [col for col in feature_cols if col not in excluded]
 
 
 def _build_report_level_feature_table(
@@ -344,6 +358,11 @@ def add_staged_features(
             reaction_clip[1],
         )
 
+        # No report means there is no event anchor; keep reaction features missing.
+        has_report = out[feature_available_col].notna()
+        for col in ["anchor_price", "drift_since_report", "days_since_report", "reaction_speed"]:
+            out.loc[~has_report, col] = np.nan
+
     if max_stage >= 5:
         if price_col not in out.columns:
             raise KeyError(f"Missing required column for vol_regime_ratio_20_60: {price_col}")
@@ -383,18 +402,68 @@ def winsorize_cross_sectional(
     return out
 
 
+def rank_cross_sectional(
+    panel_df: pd.DataFrame,
+    feature_cols: list[str],
+    date_col: str = "date",
+    suffix: str = "_rank",
+    center: bool = False,
+    ascending: bool = True,
+    tie_method: str = "average",
+    universe_col: str | None = None,
+) -> pd.DataFrame:
+    """Create cross-sectional rank-normalized columns by date.
+
+    Per date, scores are computed as ``(rank - 0.5) / N`` where ``N`` is the
+    number of non-null observations in that date's cross-section.
+
+    If ``universe_col`` is provided, only rows where that column is truthy are
+    included in the cross-sectional ranking for each date. Non-universe rows are
+    assigned ``NaN`` in the rank output.
+    """
+    out = panel_df.copy()
+    if universe_col is not None and universe_col in out.columns:
+        universe_mask = out[universe_col].fillna(False).astype(bool).to_numpy()
+    else:
+        universe_mask = np.ones(len(out), dtype=bool)
+
+    for col in feature_cols:
+        if col not in out.columns:
+            continue
+        vals = pd.to_numeric(out[col], errors="coerce")
+        vals = vals.where(universe_mask, np.nan)
+        grp = vals.groupby(out[date_col])
+        rank = grp.rank(method=tie_method, ascending=ascending)
+        count = grp.transform("count")
+        score = np.where(count > 0, (rank - 0.5) / count, np.nan)
+        if center:
+            score = score - 0.5
+        score = np.where(universe_mask, score, np.nan)
+        out[f"{col}{suffix}"] = np.asarray(score, dtype=float)
+    return out
+
+
 def zscore_cross_sectional(
     panel_df: pd.DataFrame,
     feature_cols: list[str],
     date_col: str = "date",
     suffix: str = "_z",
+    source_suffix: str | None = None,
+    source_overrides: dict[str, str] | None = None,
 ) -> pd.DataFrame:
-    """Create cross-sectional z-score normalized feature columns by date."""
+    """Create cross-sectional z-score normalized feature columns by date.
+
+    If ``source_suffix`` is provided, each feature ``col`` is sourced from
+    ``f"{col}{source_suffix}"`` unless explicitly set in ``source_overrides``.
+    Output names remain ``f"{col}{suffix}"``.
+    """
     out = panel_df.copy()
+    overrides = source_overrides or {}
     for col in feature_cols:
-        if col not in out.columns:
+        source_col = overrides.get(col, f"{col}{source_suffix}" if source_suffix else col)
+        if source_col not in out.columns:
             continue
-        vals = pd.to_numeric(out[col], errors="coerce")
+        vals = pd.to_numeric(out[source_col], errors="coerce")
         grp = vals.groupby(out[date_col])
         mean = grp.transform("mean")
         std = grp.transform(lambda s: s.std(ddof=0))
@@ -465,6 +534,9 @@ def build_lstm_tensors(
     lookback: int,
     split_col: str = "split",
 ) -> dict[str, tuple[np.ndarray, np.ndarray]]:
+    if lookback < 1:
+        raise ValueError(f"lookback must be >= 1, got {lookback}")
+
     required_cols = set(["ticker", "date", split_col, target_col, *feature_cols])
     missing = required_cols - set(panel_df.columns)
     if missing:

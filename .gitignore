@@ -212,3 +212,6 @@ PRICES.csv
 
 data/lstm_draft/processed/*.pkl
 data/lstm_draft/processed/data/lstm_draft/processed/feature_panel_pit_normalized_full_history.csv
+
+# local datasets
+data/

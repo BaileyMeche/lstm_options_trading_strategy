@@ -48,16 +48,26 @@ def extract_fundamental_events(
     changed = pd.Series(False, index=e2.index)
     for col in features:
         prev = e2.groupby("ticker")[col].shift(1)
-        changed = changed | (~e2[col].fillna(np.nan).eq(prev.fillna(np.nan)))
+        same_value = e2[col].eq(prev) | (e2[col].isna() & prev.isna())
+        changed = changed | (~same_value)
 
     first_mask = e2.groupby("ticker").cumcount().eq(0)
     keep = changed | first_mask
     filtered = e2[keep].copy()
 
-    full_tickers = set(e2["ticker"].unique().tolist())
-    kept_tickers = set(filtered["ticker"].unique().tolist())
-    if full_tickers - kept_tickers:
-        filtered = e2.copy()
+    missing_tickers = sorted(set(e2["ticker"].unique().tolist()) - set(filtered["ticker"].unique().tolist()))
+    if missing_tickers:
+        first_events = (
+            e2[e2["ticker"].isin(missing_tickers)]
+            .sort_values(["ticker", "feature_available_date"])
+            .groupby("ticker", as_index=False)
+            .head(1)
+        )
+        filtered = (
+            pd.concat([filtered, first_events], ignore_index=True)
+            .sort_values(["ticker", "feature_available_date"])
+            .drop_duplicates(["ticker", "feature_available_date"], keep="first")
+        )
 
     return filtered[["ticker", "feature_available_date"]].reset_index(drop=True)
 
@@ -210,9 +220,11 @@ def aggregate_event_time_intensity(
     if agg == "mean":
         grouped = event_panel_df.groupby(["ticker", "event_day"], dropna=True)[value_col].mean()
         baseline = event_panel_df.groupby("event_day", dropna=True)[value_col].mean()
-    else:
+    elif agg == "median":
         grouped = event_panel_df.groupby(["ticker", "event_day"], dropna=True)[value_col].median()
         baseline = event_panel_df.groupby("event_day", dropna=True)[value_col].median()
+    else:
+        raise ValueError(f"agg must be one of {{'median', 'mean'}}, got {agg!r}")
 
     heat = grouped.unstack("event_day")
     heat = heat.reindex(index=ticker_order, columns=cols)

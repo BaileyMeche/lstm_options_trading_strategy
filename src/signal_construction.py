@@ -83,6 +83,10 @@ def rank_predictions_cross_sectionally(
     sorted by ``date_col`` asc, ``pred_rank`` asc.
     """
     df = predictions_df.copy()
+    if date_col not in df.columns or pred_col not in df.columns:
+        raise KeyError(f"predictions_df must contain '{date_col}' and '{pred_col}' columns")
+
+    df[pred_col] = pd.to_numeric(df[pred_col], errors="coerce")
 
     if volume_col not in df.columns:
         warnings.warn(
@@ -91,12 +95,8 @@ def rank_predictions_cross_sectionally(
             stacklevel=2,
         )
         df_sorted = df.sort_values(by=[date_col, pred_col], ascending=[True, False])
-        df_sorted["pred_rank"] = (
-            df_sorted.groupby(date_col)[pred_col]
-            .rank(method="first", ascending=False)
-            .astype(int)
-        )
     else:
+        df[volume_col] = pd.to_numeric(df[volume_col], errors="coerce")
         # Sort by date asc, then y_pred desc, then volume desc for tie-breaking.
         # method="first" assigns rank by order of appearance, so higher-volume rows
         # (sorted earlier) receive better ranks within equal y_pred values.
@@ -104,15 +104,13 @@ def rank_predictions_cross_sectionally(
             by=[date_col, pred_col, volume_col],
             ascending=[True, False, False],
         )
-        df_sorted["pred_rank"] = (
-            df_sorted.groupby(date_col)[pred_col]
-            .rank(method="first", ascending=False)
-            .astype(int)
-        )
 
-    df_sorted["n_assets"] = (
-        df_sorted.groupby(date_col)[pred_col].transform("count").astype(int)
+    valid_pred = df_sorted[pred_col].notna()
+    df_sorted["pred_rank"] = np.nan
+    df_sorted.loc[valid_pred, "pred_rank"] = (
+        df_sorted.loc[valid_pred].groupby(date_col)[pred_col].rank(method="first", ascending=False)
     )
+    df_sorted["n_assets"] = valid_pred.groupby(df_sorted[date_col]).transform("sum").astype(int)
 
     df_sorted = df_sorted.sort_values([date_col, "pred_rank"]).reset_index(drop=True)
     return df_sorted
